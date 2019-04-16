@@ -1,0 +1,147 @@
+---
+title: "Text Analysis HK Newspaper"
+author: "Po-Sheng Lee"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r package}
+library(pdftools)
+library(tidyverse)
+library(tm)
+library(tmcn)
+library(quanteda)
+library(tidytext)
+library(jiebaR)
+library(wordcloud)
+library(stringr)
+library(httr)
+library(rvest)
+library(readtext)
+library(magrittr)
+library(knitr)
+library(igraph)
+library(ggraph)
+
+```
+
+
+# Import text corpus
+
+Text is downloaded from WiseNews using keyword *移民台灣*. The news source include Ming Po, Apple Daily, Tai Gung, Wen Hui, Sin Dao, Metro, City, Orient. The time span is from 1998 to 2018.
+
+```{r Import text data}
+
+temp <- list.files(path = "text", pattern = "pdf$")
+Rpdf <- readPDF(control = list(text = "-layout"))
+textcorpus <- Corpus(URISource(str_c("text/", temp)), readerControl = list(reader = Rpdf, language = "zh"))
+## The first four character in ID is the year of text
+
+workcorpus <- tm_map(textcorpus, removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(function(word) {
+    gsub("[A-Za-z0-9]", "", word)
+    })
+
+
+text_tidy <- tidy(textcorpus)
+text_tidy %<>%
+  mutate(year = str_sub(meta(textcorpus, tag = "id"), 1, 4), 
+         publisher = str_match(text, "蘋果日報|明報|東方日報|星島日報|晴報|都市日報|大公報|文匯報")) %>%
+  select(id, year, publisher, text)
+
+```
+
+```{r segment and stop}
+
+seg <- worker(symbol = T, bylines = F, stop_word = "stopWords.txt")
+idx <- seq_along(text_tidy$text)
+for (i in idx){
+    text_tidy$text[i] <- text_tidy$text[i] %>%
+      segment(seg) %>% 
+      paste(collapse = " ")
+}
+
+corp <- corpus(text_tidy, docid_field = "id", text_field = "text") 
+
+
+# use scan to create a character vector
+chtr_stopwords <- scan("stopWords.txt", character(), quote = "") 
+
+chtr_stopwords <- c(chtr_stopwords, "內容", "服務", "提供", "電子", "版權", "使用者", "許可", 
+                    "相關", "擁有", "機構", "引起", "負責", "責任", "保留", "報章", "權利", 
+                    "承擔", "自行", "損失", "損害", "商標", "標記", "文章", "總數", "by", 
+                    "日報", "蘋果")
+
+text_token <- tokens(corp, remove_punct = TRUE) %>%
+  tokens_select(pattern = chtr_stopwords, selection = "remove" )
+
+text_dfm <- dfm(text_token) 
+
+text_dfm_year <- dfm_group(text_dfm, groups = "year")
+
+```
+
+```{r frequency and wordcloud}
+
+text_dfm %>%
+  textstat_frequency(n = 20, groups = "year") %>% 
+  filter(group == c("1998", "1999", "2000", "2001", "2002")) %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(title = "1998-2002 word freq", x = NULL, y = "Frequency") +
+  theme(text = element_text(family = "Heiti TC Light"))
+
+text_dfm %>%
+  textstat_frequency(n = 20, groups = "year") %>% 
+  filter(group == c("2003", "2004", "2005", "2006", "2007")) %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(title = "2003-2007 word freq", x = NULL, y = "Frequency") +
+  theme(text = element_text(family = "Heiti TC Light"))
+
+text_dfm %>%
+  textstat_frequency(n = 20, groups = "year") %>% 
+  filter(group == c("2008", "2009", "2010", "2011", "2012")) %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(title = "2008-2012 word freq", x = NULL, y = "Frequency") +
+  theme(text = element_text(family = "Heiti TC Light"))
+
+text_dfm %>%
+  textstat_frequency(n = 20, groups = "year") %>% 
+  filter(group == c("2013", "2014", "2015", "2016", "2017", "2018")) %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(title = "2013-2018 word freq", x = NULL, y = "Frequency") +
+  theme(text = element_text(family = "Heiti TC Light"))
+
+```
+
+```{r keyness}
+
+tstat_key <- textstat_keyness(text_dfm, 
+                              target = docvars(text_dfm, "year") >= 2013)
+attr(tstat_key, "documents") <- c("2013-2018", '1998-2012')
+
+textplot_keyness(tstat_key) + theme(text=element_text(family="Heiti TC Light"))
+
+```
+
+```{r correspondence}
+
+tmod_ca <- textmodel_ca(text_dfm)
+
+textplot_scale1d(tmod_ca)
+
+```
+
+
+
